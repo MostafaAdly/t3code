@@ -29,7 +29,7 @@ const attach = flags.includes("--attach");
 
 // An unrecognized flag must never fall through to a real rebuild: this
 // script quits and replaces the installed app.
-const UNKNOWN = flags.filter((flag) => flag !== "--attach");
+const UNKNOWN = flags.filter((flag) => flag !== "--attach" && flag !== "--force");
 if (UNKNOWN.length > 0) {
   console.log(
     [
@@ -37,6 +37,7 @@ if (UNKNOWN.length > 0) {
       "",
       "  vp run reinstall            build, swap, relaunch (detached)",
       "  vp run reinstall --attach   run in the foreground",
+      "  vp run reinstall --force    proceed even if a dev stack is running",
     ].join("\n"),
   );
   process.exit(UNKNOWN.some((flag) => flag === "--help" || flag === "-h") ? 0 : 1);
@@ -51,11 +52,36 @@ if (NodeChildProcess.spawnSync("hdiutil", ["help"], { stdio: "ignore" }).status 
   process.exit(1);
 }
 
+// A dev stack from this checkout and the installed app fight over the same
+// loopback ports, and a crash-looping backend leaves windows that can never
+// authenticate. Refusing here is cheaper than diagnosing that afterwards.
+if (!flags.includes("--force")) {
+  const running = NodeChildProcess.spawnSync("pgrep", ["-f", "scripts/dev-runner.ts"], {
+    encoding: "utf8",
+  });
+  const pids = (running.stdout ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && line !== String(process.pid));
+  if (pids.length > 0) {
+    console.error(
+      [
+        `A dev stack is running (pid ${pids.join(", ")}). It shares this machine's dev ports,`,
+        "so reinstalling now can leave app windows that never finish signing in.",
+        "",
+        `Stop it first (Ctrl+C in its terminal, or: kill ${pids.join(" ")}), then run this again.`,
+        "Use --force to reinstall anyway.",
+      ].join("\n"),
+    );
+    process.exit(1);
+  }
+}
+
 // Re-exec detached so the build survives the app being quit below.
 if (!attach && process.env.T3CODE_REINSTALL_CHILD !== "1") {
   NodeFS.mkdirSync(NodePath.dirname(logPath), { recursive: true });
   const log = NodeFS.openSync(logPath, "a");
-  NodeChildProcess.spawn(process.execPath, [scriptPath, "--attach"], {
+  NodeChildProcess.spawn(process.execPath, [scriptPath, "--attach", "--force"], {
     cwd: repoRoot,
     detached: true,
     stdio: ["ignore", log, log],
