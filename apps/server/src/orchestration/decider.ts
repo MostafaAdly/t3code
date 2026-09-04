@@ -1255,6 +1255,40 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.messages.import": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // One event per message, in the order given; timestamps are the
+      // originals so the thread reads as it happened.
+      const imported: Array<Omit<OrchestrationEvent, "sequence">> = [];
+      for (const message of command.messages) {
+        imported.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: message.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: message.messageId,
+            role: message.role,
+            text: message.text,
+            attachments: [],
+            turnId: null,
+            streaming: false,
+            createdAt: message.createdAt,
+            updatedAt: message.createdAt,
+          },
+        });
+      }
+      return imported;
+    }
+
     case "thread.proposed-plan.upsert": {
       yield* requireThread({
         readModel,

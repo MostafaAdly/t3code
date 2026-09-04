@@ -11,6 +11,12 @@ import {
   ProviderSetupError,
   ProviderSetupInput,
 } from "./providerSetup.ts";
+import {
+  ClaudeImportError,
+  ClaudeImportInput,
+  ClaudeImportPlan,
+  ClaudeImportProgressEvent,
+} from "./claudeImport.ts";
 
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import {
@@ -251,6 +257,8 @@ export const WS_METHODS = {
   providerInstallCancel: "provider.install.cancel",
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
+  claudeImportScan: "claude.import.scan",
+  claudeImportRun: "claude.import.run",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -464,6 +472,21 @@ export const WsProviderInstallRemoveRpc = Rpc.make(WS_METHODS.providerInstallRem
   payload: ProviderSetupInput,
   success: ProviderInstallState,
   error: ProviderSetupRpcError,
+});
+
+const ClaudeImportRpcError = Schema.Union([ClaudeImportError, EnvironmentAuthorizationError]);
+
+export const WsClaudeImportScanRpc = Rpc.make(WS_METHODS.claudeImportScan, {
+  payload: ClaudeImportInput,
+  success: ClaudeImportPlan,
+  error: ClaudeImportRpcError,
+});
+
+export const WsClaudeImportRunRpc = Rpc.make(WS_METHODS.claudeImportRun, {
+  payload: ClaudeImportInput,
+  success: ClaudeImportProgressEvent,
+  error: ClaudeImportRpcError,
+  stream: true,
 });
 
 export const WsServerUpdateServerRpc = Rpc.make(WS_METHODS.serverUpdateServer, {
@@ -1164,6 +1187,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderInstallCancelRpc,
   WsProviderInstallSubscribeRpc,
   WsProviderInstallRemoveRpc,
+  WsClaudeImportScanRpc,
+  WsClaudeImportRunRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,
   WsServerCommitDesktopUpdateRpc,

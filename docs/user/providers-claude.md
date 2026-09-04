@@ -234,3 +234,20 @@ If the preset needs different Claude files, give it a different `CLAUDE_CONFIG_D
 different API keys, base URLs, or router settings, use Environment variables.
 
 Do not put environment variable assignments in `Launch arguments`.
+
+## Import your Claude Code sessions
+
+Open **Settings → Providers**, select your Claude Code provider, and choose **Import**. Pick how far
+back to look (judged by each session's last message), review the list of projects and sessions that
+would come across, then confirm. A progress bar shows sessions and messages as they land, and the
+threads appear in the sidebar immediately, grouped under the folder each session ran in. Folders
+Adly has not seen before become new projects.
+
+Only the conversation is imported: your messages and Claude's replies. Tool calls, file edits, and
+images stay out. Imported threads are history: sending a message in one starts a fresh Claude
+session in that folder, with your project's rules, memory, and skills but without the old
+conversation in context.
+
+The import reads Claude Code's transcript files and never changes them; Claude Code keeps working
+exactly as before. Adly remembers which sessions it imported, so running the import again only adds
+new ones.

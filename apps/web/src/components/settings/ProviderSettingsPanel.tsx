@@ -69,6 +69,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
+import { ClaudeImportSection } from "./ClaudeImportSection";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import { providerSettingsTabClassName } from "./providerSettingsTabs";
@@ -850,7 +851,13 @@ export function EnvironmentProviderSettings({
         onSelect={mode === "list" ? () => setSelectedInstanceId(row.instanceId) : undefined}
         readOnly={readOnly}
         setup={
-          mode === "editor" && row.driver === "antigravity" ? (
+          mode === "editor" && row.driver === "claudeAgent" ? (
+            <ClaudeImportSection
+              environmentId={environmentId}
+              instanceId={row.instanceId}
+              readOnly={readOnly}
+            />
+          ) : mode === "editor" && row.driver === "antigravity" ? (
             <ProviderSetupSection
               environmentId={environmentId}
               environmentLabel={environmentLabel}

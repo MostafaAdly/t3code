@@ -1,6 +1,8 @@
 import {
   type EnvironmentId,
   type ServerConfig,
+  type ClaudeImportInput,
+  type ClaudeImportProgressEvent,
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
   type ServerLifecycleStreamReadyEvent,
@@ -8,6 +10,11 @@ import {
   type ServerSelfUpdateResult,
   WS_METHODS,
 } from "@t3tools/contracts";
+
+export interface ClaudeImportRunInput extends ClaudeImportInput {
+  // Fires for every progress event; the command resolves with the final one.
+  readonly onProgress?: (event: ClaudeImportProgressEvent) => void;
+}
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -25,6 +32,7 @@ import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import {
   createAtomCommandScheduler,
+  createEnvironmentCommand,
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
@@ -851,6 +859,46 @@ export function createServerEnvironmentAtoms<R, E>(
     removeProviderInstallation: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:provider:install-remove",
       tag: WS_METHODS.providerInstallRemove,
+    }),
+    scanClaudeImport: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:claude-import-scan",
+      tag: WS_METHODS.claudeImportScan,
+    }),
+    // Streams progress back through `onProgress`; resolves with the final
+    // `complete` event.
+    runClaudeImport: createEnvironmentCommand(runtime, {
+      label: "environment-data:provider:claude-import-run",
+      concurrency: {
+        mode: "singleFlight",
+        key: (target: {
+          readonly environmentId: EnvironmentId;
+          readonly input: ClaudeImportRunInput;
+        }) => target.environmentId,
+      },
+      execute: (input: ClaudeImportRunInput) =>
+        Effect.gen(function* () {
+          const terminal = yield* Ref.make<Option.Option<ClaudeImportProgressEvent>>(Option.none());
+          // execute already runs inside the environment's supervisor scope.
+          yield* runStream(WS_METHODS.claudeImportRun, {
+            instanceId: input.instanceId,
+            range: input.range,
+          }).pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                try {
+                  input.onProgress?.(event);
+                } catch {
+                  // Presentation callbacks must not fail the import.
+                }
+              }).pipe(
+                Effect.andThen(
+                  event.type === "complete" ? Ref.set(terminal, Option.some(event)) : Effect.void,
+                ),
+              ),
+            ),
+          );
+          return yield* Ref.get(terminal);
+        }),
     }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",

@@ -1122,6 +1122,22 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// Imported history: messages recorded as they were, no turn, no provider.
+// Server-only, so an import cannot be replayed from a client.
+const ThreadMessagesImportCommand = Schema.Struct({
+  type: Schema.Literal("thread.messages.import"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messages: Schema.Array(
+    Schema.Struct({
+      messageId: MessageId,
+      role: OrchestrationMessageRole,
+      text: Schema.String,
+      createdAt: IsoDateTime,
+    }),
+  ),
+});
+
 const ThreadProposedPlanUpsertCommand = Schema.Struct({
   type: Schema.Literal("thread.proposed-plan.upsert"),
   commandId: CommandId,
@@ -1173,6 +1189,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
+  ThreadMessagesImportCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,

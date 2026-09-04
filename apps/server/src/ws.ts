@@ -99,6 +99,7 @@ import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
+import { makeClaudeSessionImport } from "./claudeImport/ClaudeSessionImport.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -516,6 +517,7 @@ const makeWsRpcLayer = (
       const providerAuth = yield* ProviderAuthService;
       const providerInstances = yield* ProviderInstanceRegistry;
       const providerInstallation = yield* makeProviderInstallation();
+      const claudeImport = yield* makeClaudeSessionImport();
       const serverUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
@@ -1779,6 +1781,14 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.providerInstallRemove]: (input) =>
           observeRpcEffect(WS_METHODS.providerInstallRemove, providerInstallation.remove(input), {
+            "rpc.aggregate": "provider",
+          }),
+        [WS_METHODS.claudeImportScan]: (input) =>
+          observeRpcEffect(WS_METHODS.claudeImportScan, claudeImport.scan(input), {
+            "rpc.aggregate": "provider",
+          }),
+        [WS_METHODS.claudeImportRun]: (input) =>
+          observeRpcStream(WS_METHODS.claudeImportRun, claudeImport.run(input), {
             "rpc.aggregate": "provider",
           }),
         [WS_METHODS.serverUpdateServer]: (input) =>
