@@ -1,4 +1,4 @@
-export const BUILT_IN_THEME_IDS = ["t3-chat", "grove", "ocean", "ember", "iris"] as const;
+export const BUILT_IN_THEME_IDS = ["t3-chat", "grove", "ocean", "ember", "iris", "abyss"] as const;
 
 /** The mobile app's own hand-tuned palette, which is not part of the built-in library. */
 export const MOBILE_DEFAULT_THEME_ID = "t3-code";
@@ -756,12 +756,84 @@ export const IRIS_THEME: ThemeDefinition = {
   sidebarArtwork: true,
 };
 
+/**
+ * Deep water read as glass: one dark-only palette on a blue-teal axis, lit by
+ * a bioluminescent cyan. Its surfaces climb in small lightness steps so the
+ * frosted chrome (`--glass-*` in the web stylesheet, tuned deeper for this
+ * theme) has layers to separate rather than one flat black.
+ */
+export const ABYSS_THEME: ThemeDefinition = {
+  id: "abyss",
+  label: "Abyss",
+  appearance: "dark",
+  colors: {
+    canvas: "oklch(0.1955 0.0304 249.8)",
+    chrome: "oklch(0.1735 0.0292 251.5)",
+    toolbar: "oklch(0.1735 0.0292 251.5)",
+    toolbarForeground: "oklch(0.9584 0.0122 220.4)",
+    toolbarBorder: "oklch(0.3182 0.0392 247.6)",
+    toolbarControl: "oklch(0.2686 0.0364 248.9)",
+    toolbarControlForeground: "oklch(0.9016 0.0186 219.7)",
+    toolbarControlHover: "oklch(0.3204 0.0428 246.4)",
+    surface: "oklch(0.2312 0.0328 249.2)",
+    surfaceRaised: "oklch(0.2648 0.0356 248.3)",
+    surfaceOverlay: "oklch(0.2456 0.0372 250.6)",
+    text: "oklch(0.9612 0.0128 216.8)",
+    textMuted: "oklch(0.7386 0.0298 227.4)",
+    border: "oklch(0.3348 0.0386 247.2)",
+    input: "oklch(0.3766 0.0412 246.1)",
+    focus: "oklch(0.8124 0.1156 200.7)",
+    accent: "oklch(0.8124 0.1156 200.7)",
+    accentForeground: "oklch(0.1735 0.0292 251.5)",
+    secondary: "oklch(0.2864 0.0378 248.2)",
+    secondaryForeground: "oklch(0.9186 0.0164 220.9)",
+    muted: "oklch(0.2612 0.0344 248.8)",
+    mutedForeground: "oklch(0.7284 0.0306 228.6)",
+    placeholder: "oklch(0.6512 0.0288 232.1)",
+    secondaryLabel: "oklch(0.7386 0.0298 227.4)",
+    iconMuted: "oklch(0.7018 0.0312 229.5)",
+    error: "oklch(0.6684 0.1892 19.4)",
+    errorForeground: "oklch(0.7862 0.1424 21.6)",
+    errorSurface: "oklch(0.2884 0.0642 15.8)",
+    warning: "oklch(0.7912 0.1436 74.2)",
+    warningForeground: "oklch(0.8484 0.1382 82.6)",
+    warningSurface: "oklch(0.2986 0.0384 68.4)",
+    update: "oklch(0.8124 0.1156 200.7)",
+    updateForeground: "oklch(0.8562 0.0834 205.3)",
+    updateSurface: "oklch(0.3122 0.0512 226.8)",
+    accentSurface: "oklch(0.3068 0.0436 245.7)",
+    accentSurfaceForeground: "oklch(0.9612 0.0128 216.8)",
+    messageSurface: "oklch(0.2778 0.0398 247.9)",
+    messageForeground: "oklch(0.9612 0.0128 216.8)",
+    messageAction: "oklch(0.7864 0.1224 196.4)",
+    messageActionForeground: "oklch(0.1735 0.0292 251.5)",
+    messageActionHover: "oklch(0.8286 0.1108 197.8)",
+    codeBackground: "oklch(0.2168 0.0322 250.4)",
+    codeForeground: "oklch(0.9186 0.0202 213.6)",
+    sidebar: "oklch(0.1622 0.0286 252.4)",
+    sidebarForeground: "oklch(0.9612 0.0128 216.8)",
+    sidebarMutedForeground: "oklch(0.7128 0.0296 229.8)",
+    sidebarControlSurface: "oklch(0.2492 0.0362 249.4)",
+    sidebarRowHover: "oklch(0.2286 0.0348 249.8)",
+    sidebarRowActive: "oklch(0.2688 0.0402 247.9)",
+    sidebarRowSelected: "oklch(0.2896 0.0446 246.8)",
+    sidebarBorder: "oklch(0.2884 0.0348 249.1)",
+    terminalBackground: "oklch(0.1735 0.0292 251.5)",
+    terminalForeground: "oklch(0.9612 0.0128 216.8)",
+    terminalCursor: "oklch(0.8124 0.1156 200.7)",
+    terminalSelection: "oklch(0.3204 0.0428 246.4)",
+    terminalScrollbar: "oklch(0.4128 0.0362 245.2)",
+    terminalScrollbarHover: "oklch(0.5184 0.0328 240.6)",
+  },
+};
+
 export const BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [
   T3_CHAT_THEME,
   GROVE_THEME,
   OCEAN_THEME,
   EMBER_THEME,
   IRIS_THEME,
+  ABYSS_THEME,
 ];
 
 export function getThemeColorsForAppearance(
