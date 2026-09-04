@@ -10,6 +10,7 @@ import { HostProcessEnvironment, HostProcessWorkingDirectory } from "@t3tools/sh
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Hash from "effect/Hash";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -276,6 +277,28 @@ export function resolveOffset(config: {
 
   return Effect.succeed({ offset: 0, source: "default ports" });
 }
+
+/**
+ * The server whose runtime state sits at `runtimeStatePath`, when its pid is
+ * still alive. A dead pid means the file was left behind by a crash.
+ */
+const readLiveServerOwner = (
+  fileSystem: FileSystem.FileSystem,
+  runtimeStatePath: string,
+): Effect.Effect<{ readonly pid: number; readonly origin: string } | undefined> =>
+  fileSystem.readFileString(runtimeStatePath).pipe(
+    Effect.flatMap((contents) =>
+      Effect.try(() => {
+        const parsed: unknown = JSON.parse(contents);
+        if (typeof parsed !== "object" || parsed === null) return undefined;
+        const { pid, origin } = parsed as { readonly pid?: unknown; readonly origin?: unknown };
+        if (typeof pid !== "number" || typeof origin !== "string") return undefined;
+        process.kill(pid, 0);
+        return { pid, origin };
+      }),
+    ),
+    Effect.orElseSucceed(() => undefined),
+  );
 
 function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, never, Path.Path> {
   return Effect.gen(function* () {
@@ -679,12 +702,16 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     // outrank an ambient T3CODE_HOME. `--home-dir` still wins.
     const worktreeHome = yield* resolveWorktreeT3Home(yield* HostProcessWorkingDirectory);
     // Trim before choosing: `--home-dir ""` is not a selection, and treating it
-    // as one would skip the worktree default and land on the shared home —
-    // exactly the outcome this precedence exists to prevent.
+    // as one would skip the worktree default and land on the shared home.
+    // Outside a worktree the shared home is the point: the main checkout gets
+    // `~/.t3` explicitly, which puts its state in the installed app's
+    // `~/.t3/userdata` instead of a separate `~/.t3/dev`, so the dev build
+    // shows the same projects and threads as the installed one.
     const resolvedT3Home =
       (input.t3Home?.trim() || undefined) ??
       worktreeHome ??
-      (hostEnvironment.T3CODE_HOME?.trim() || undefined);
+      (hostEnvironment.T3CODE_HOME?.trim() || undefined) ??
+      (yield* DEFAULT_T3_HOME);
     const env = yield* createDevRunnerEnv({
       mode: input.mode,
       baseEnv: hostEnvironment,
@@ -708,6 +735,21 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     yield* Effect.logInfo(
       `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${baseDir}`,
     );
+
+    // Two servers on one state directory do not corrupt it (SQLite runs in
+    // WAL mode), but each keeps its own in-memory read model, so a thread
+    // created through one shows up in the other only after a restart. Say so
+    // up front rather than leaving a stale sidebar to be discovered later.
+    const path = yield* Path.Path;
+    const owner = yield* readLiveServerOwner(
+      yield* FileSystem.FileSystem,
+      path.join(baseDir, "userdata", "server-runtime.json"),
+    );
+    if (owner !== undefined) {
+      yield* Effect.logWarning(
+        `[dev-runner] ${baseDir}/userdata is already open by a running server (pid ${owner.pid}, ${owner.origin}); the two only see each other's changes after a restart. Pass --home-dir for isolated state.`,
+      );
+    }
 
     // Before the share block: --dry-run only resolves and prints. Sharing would
     // replace, then tear down, whatever mapping the port already had — a
