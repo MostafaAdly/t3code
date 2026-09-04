@@ -52,22 +52,61 @@ if (NodeChildProcess.spawnSync("hdiutil", ["help"], { stdio: "ignore" }).status 
   process.exit(1);
 }
 
-// A dev stack from this checkout and the installed app fight over the same
-// loopback ports, and a crash-looping backend leaves windows that can never
-// authenticate. Refusing here is cheaper than diagnosing that afterwards.
-if (!flags.includes("--force")) {
-  const running = NodeChildProcess.spawnSync("pgrep", ["-f", "scripts/dev-runner.ts"], {
-    encoding: "utf8",
-  });
-  const pids = (running.stdout ?? "")
+/**
+ * Pids whose command line contains `needle`, matched as a literal string.
+ *
+ * Deliberately not `pgrep -f`: its pattern is a regular expression, so the
+ * parentheses in "Adly (Alpha).app" are read as a group and the path can
+ * never match. That silently reported "nothing is running" and let the
+ * bundle be deleted out from under a live app.
+ */
+const pidsMatching = (needle: string): Array<string> =>
+  (NodeChildProcess.spawnSync("ps", ["-eo", "pid=,command="], { encoding: "utf8" }).stdout ?? "")
     .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && line !== String(process.pid));
+    .filter((line) => line.includes(needle))
+    .map((line) => line.trim().split(/\s+/)[0] ?? "")
+    .filter((pid) => pid.length > 0);
+
+/** Working directory per pid, for the pids lsof can see. */
+const cwdByPid = (pids: ReadonlyArray<string>): Map<string, string> => {
+  const result = new Map<string, string>();
+  if (pids.length === 0) return result;
+  const out =
+    NodeChildProcess.spawnSync("lsof", ["-a", "-d", "cwd", "-p", pids.join(","), "-Fpn"], {
+      encoding: "utf8",
+    }).stdout ?? "";
+  let pid = "";
+  for (const line of out.split("\n")) {
+    if (line.startsWith("p")) pid = line.slice(1);
+    else if (line.startsWith("n") && pid.length > 0) result.set(pid, line.slice(1));
+  }
+  return result;
+};
+
+const isInsideRepo = (cwd: string | undefined) =>
+  cwd !== undefined && (cwd === repoRoot || cwd.startsWith(repoRoot + NodePath.sep));
+
+// A dev stack from this checkout fights the installed app for loopback ports,
+// and the desktop dev watcher (`vp pack --watch` driving dev-electron.mjs)
+// relaunches Electron every time the artifact build below rewrites
+// dist-electron/ or apps/server/dist/. Those watchers outlive their dev-runner
+// whenever the terminal that ran `vp run dev:desktop` dies with the app, so
+// they are matched directly: each survivor opens one more window whose backend
+// can never take its port. Refusing here is cheaper than diagnosing that.
+if (!flags.includes("--force")) {
+  const runners = pidsMatching("scripts/dev-runner.ts").filter(
+    (pid) => pid !== String(process.pid),
+  );
+  const watcherCandidates = [...pidsMatching("dev-electron.mjs"), ...pidsMatching("pack --watch")];
+  const cwds = cwdByPid(watcherCandidates);
+  const watchers = watcherCandidates.filter((pid) => isInsideRepo(cwds.get(pid)));
+  const pids = [...new Set([...runners, ...watchers])];
   if (pids.length > 0) {
     console.error(
       [
-        `A dev stack is running (pid ${pids.join(", ")}). It shares this machine's dev ports,`,
-        "so reinstalling now can leave app windows that never finish signing in.",
+        `A dev stack from this checkout is running (pid ${pids.join(", ")}).`,
+        "Its desktop watcher relaunches Electron whenever the build rewrites dist-electron/,",
+        "so reinstalling now opens extra windows whose backend can never bind its port.",
         "",
         `Stop it first (Ctrl+C in its terminal, or: kill ${pids.join(" ")}), then run this again.`,
         "Use --force to reinstall anyway.",
@@ -93,6 +132,7 @@ if (!attach && process.env.T3CODE_REINSTALL_CHILD !== "1") {
 }
 
 const step = (message: string) => console.log(`=== ${new Date().toISOString()} ${message}`);
+
 const run = (
   command: string,
   args: ReadonlyArray<string>,
@@ -150,14 +190,25 @@ const source = NodePath.join(volume, appName);
 const target = NodePath.join("/Applications", appName);
 const detach = () => run("hdiutil", ["detach", volume, "-quiet"], { quiet: true });
 
-step(`quitting ${appName.replace(/\.app$/, "")}`);
-run("osascript", ["-e", `quit app "${appName.replace(/\.app$/, "")}"`], { quiet: true });
-for (let attempt = 0; attempt < 40; attempt++) {
-  const running = NodeChildProcess.spawnSync("pgrep", ["-f", `${target}/Contents/MacOS/`], {
-    encoding: "utf8",
-  });
-  if (running.status !== 0) break;
+const displayName = appName.replace(/\.app$/, "");
+const runningPids = () => pidsMatching(`${target}/Contents/MacOS/`);
+
+step(`quitting ${displayName}`);
+run("osascript", ["-e", `quit app "${displayName}"`], { quiet: true });
+for (let attempt = 0; attempt < 40 && runningPids().length > 0; attempt++) {
   NodeChildProcess.spawnSync("sleep", ["1"]);
+}
+
+// Replacing the bundle under a live process leaves a window whose resources
+// have been deleted: it renders black and never recovers. Stop instead.
+const stubborn = runningPids();
+if (stubborn.length > 0) {
+  detach();
+  step(`${displayName} is still running (pid ${stubborn.join(", ")}); nothing was replaced`);
+  console.error(
+    `Quit ${displayName} and run this again, or stop it with: kill ${stubborn.join(" ")}`,
+  );
+  process.exit(1);
 }
 
 step(`replacing ${target}`);
