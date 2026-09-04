@@ -231,9 +231,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       <ProjectProjectionRetention />
       <Sidebar
         side="left"
+        variant="floating"
         collapsible="offcanvas"
         data-app-sidebar=""
-        className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
+        className="text-sidebar-foreground"
         resizable={{
           maxWidth: sidebarMaximumWidth,
           minWidth: THREAD_SIDEBAR_MIN_WIDTH,

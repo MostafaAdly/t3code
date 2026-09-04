@@ -3,6 +3,11 @@ import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit
 import {
   animatePinnedLayoutChanges,
   archiveSelectedThreadEntries,
+  buildSidebarProjectSections,
+  resolveProjectSectionAttention,
+  resolveProviderTitleColor,
+  resolveVisibleSectionThreads,
+  toggleCollapsedProjectSection,
   buildBulkTitleRegenerationContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
@@ -1734,5 +1739,137 @@ describe("sortLogicalProjectsForSidebar", () => {
         (project) => project.projectKey,
       ),
     ).toEqual(["logical-newer", "logical-older"]);
+  });
+});
+
+describe("buildSidebarProjectSections", () => {
+  const alphaId = ProjectId.make("project-alpha");
+  const betaId = ProjectId.make("project-beta");
+  const remoteEnvironmentId = EnvironmentId.make("environment-remote");
+  const projects = [
+    {
+      projectKey: "logical-alpha",
+      memberProjectRefs: [
+        { environmentId: localEnvironmentId, projectId: alphaId },
+        { environmentId: remoteEnvironmentId, projectId: alphaId },
+      ],
+    },
+    {
+      projectKey: "logical-beta",
+      memberProjectRefs: [{ environmentId: localEnvironmentId, projectId: betaId }],
+    },
+  ];
+
+  it("keeps project order, keeps thread order inside a section, and merges group members", () => {
+    const pinnedBeta = makeThread({ id: ThreadId.make("pinned-beta"), projectId: betaId });
+    const activeAlphaLocal = makeThread({ id: ThreadId.make("alpha-local"), projectId: alphaId });
+    const activeAlphaRemote = makeThread({
+      id: ThreadId.make("alpha-remote"),
+      projectId: alphaId,
+      environmentId: remoteEnvironmentId,
+    });
+    const activeBeta = makeThread({ id: ThreadId.make("beta"), projectId: betaId });
+
+    const sections = buildSidebarProjectSections({
+      projects,
+      pinnedThreads: [pinnedBeta],
+      activeThreads: [activeBeta, activeAlphaRemote, activeAlphaLocal],
+    });
+
+    expect(sections.map((section) => section.projectKey)).toEqual([
+      "logical-alpha",
+      "logical-beta",
+    ]);
+    expect(sections[0]!.pinnedThreads).toEqual([]);
+    expect(sections[0]!.activeThreads.map((thread) => thread.id)).toEqual([
+      "alpha-remote",
+      "alpha-local",
+    ]);
+    expect(sections[1]!.pinnedThreads.map((thread) => thread.id)).toEqual(["pinned-beta"]);
+    expect(sections[1]!.activeThreads.map((thread) => thread.id)).toEqual(["beta"]);
+  });
+
+  it("keeps empty projects and collects unmapped threads in a trailing headerless section", () => {
+    const orphan = makeThread({ id: ThreadId.make("orphan"), projectId: ProjectId.make("gone") });
+    const sections = buildSidebarProjectSections({
+      projects,
+      pinnedThreads: [],
+      activeThreads: [orphan],
+    });
+    expect(sections).toHaveLength(3);
+    expect(sections[0]!.activeThreads).toEqual([]);
+    expect(sections[2]).toMatchObject({ projectKey: null, project: null });
+    expect(sections[2]!.activeThreads.map((thread) => thread.id)).toEqual(["orphan"]);
+  });
+
+  it("omits the orphan section when every thread maps to a project", () => {
+    const sections = buildSidebarProjectSections({
+      projects,
+      pinnedThreads: [],
+      activeThreads: [makeThread({ projectId: alphaId })],
+    });
+    expect(sections).toHaveLength(2);
+  });
+});
+
+describe("toggleCollapsedProjectSection", () => {
+  it("adds and removes a key without touching the others", () => {
+    expect(toggleCollapsedProjectSection([], "a")).toEqual(["a"]);
+    expect(toggleCollapsedProjectSection(["a", "b"], "a")).toEqual(["b"]);
+  });
+});
+
+describe("resolveVisibleSectionThreads", () => {
+  const threads = ["t1", "t2", "t3"];
+  const threadKey = (thread: string) => thread;
+  it("shows everything when expanded", () => {
+    expect(
+      resolveVisibleSectionThreads({ expanded: true, threads, routeThreadKey: "t2", threadKey }),
+    ).toEqual(threads);
+  });
+  it("shows only the open thread when collapsed", () => {
+    expect(
+      resolveVisibleSectionThreads({ expanded: false, threads, routeThreadKey: "t2", threadKey }),
+    ).toEqual(["t2"]);
+    expect(
+      resolveVisibleSectionThreads({ expanded: false, threads, routeThreadKey: "zz", threadKey }),
+    ).toEqual([]);
+    expect(
+      resolveVisibleSectionThreads({ expanded: false, threads, routeThreadKey: null, threadKey }),
+    ).toEqual([]);
+  });
+});
+
+describe("resolveProjectSectionAttention", () => {
+  const quiet = {
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    session: null,
+    backgroundLiveness: null,
+  };
+  it("returns null when nothing needs a human or is running", () => {
+    expect(resolveProjectSectionAttention([quiet, quiet])).toBeNull();
+    expect(resolveProjectSectionAttention([])).toBeNull();
+  });
+  it("prefers the most urgent status across the section", () => {
+    const approval = { ...quiet, hasPendingApprovals: true };
+    const input = { ...quiet, hasPendingUserInput: true };
+    expect(resolveProjectSectionAttention([quiet, input, approval])).toBe("approval");
+    expect(resolveProjectSectionAttention([quiet, input])).toBe("input");
+  });
+});
+
+describe("resolveProviderTitleColor", () => {
+  it("leans toward the brand hue and lets a custom accent win", () => {
+    expect(resolveProviderTitleColor({ driverKind: "claudeAgent", accentColor: null })).toBe(
+      "color-mix(in srgb, #d97757 28%, currentColor)",
+    );
+    expect(resolveProviderTitleColor({ driverKind: "claudeAgent", accentColor: "#123456" })).toBe(
+      "color-mix(in srgb, #123456 28%, currentColor)",
+    );
+  });
+  it("returns null for unknown providers so the row keeps its plain color", () => {
+    expect(resolveProviderTitleColor({ driverKind: "mystery", accentColor: null })).toBeNull();
+    expect(resolveProviderTitleColor({ driverKind: null, accentColor: undefined })).toBeNull();
   });
 });

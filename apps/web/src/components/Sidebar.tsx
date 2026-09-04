@@ -44,15 +44,12 @@ import {
   ChevronDownIcon,
   CircleAlertIcon,
   CircleCheckIcon,
-  CircleDashedIcon,
   ClockIcon,
-  FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
-  SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
@@ -63,7 +60,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -130,24 +126,25 @@ import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animatePinnedLayoutChanges,
   buildBulkTitleRegenerationContextMenuItem,
-  filterSidebarProjectScopeItems,
-  formatWorkingDurationLabel,
+  buildSidebarProjectSections,
   firstValidTimestampMs,
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   planPinnedReorder,
-  reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
+  resolveProjectSectionAttention,
+  resolveProviderTitleColor,
   resolveSidebarThreadStatus,
+  resolveVisibleSectionThreads,
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
-  resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
+  toggleCollapsedProjectSection,
   useRetainedValue,
   useSidebarRowSubscriptionLease,
   useThreadJumpHintVisibility,
@@ -185,18 +182,9 @@ import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import {
-  Combobox,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxPopup,
-  ComboboxTrigger,
-  useComboboxFilter,
-} from "./ui/combobox";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SidebarProjectSection } from "./sidebar/SidebarProjectSection";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
@@ -214,6 +202,10 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 // Fresh keys deliberately reset both shelves to collapsed for existing users.
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+// Project sections default to open; only the ones the user closed are stored.
+const COLLAPSED_PROJECT_SECTIONS_KEY = "t3code:sidebar:collapsed-project-sections";
+const CollapsedProjectSectionKeys = Schema.Array(Schema.String);
+const NO_COLLAPSED_PROJECT_SECTIONS: readonly string[] = [];
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -251,22 +243,6 @@ function JumpHintBadge(props: { label: string }) {
 }
 
 // Self-ticking so only this span re-renders each second, not the whole row.
-function WorkingDuration(props: { startedAt: string | null }) {
-  const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (Number.isNaN(startedMs)) return;
-    const id = window.setInterval(() => setTick((tick) => tick + 1), 1_000);
-    return () => window.clearInterval(id);
-  }, [startedMs]);
-  if (Number.isNaN(startedMs)) return null;
-  return (
-    <span className="font-mono tabular-nums">
-      {formatWorkingDurationLabel(Date.now() - startedMs)}
-    </span>
-  );
-}
-
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map();
 
 function terminalProcessLabel(count: number): string {
@@ -881,56 +857,45 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // mobile Live Activity/widgets (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
   const topStatus =
-    status === "working"
+    status === "monitoring"
       ? {
-          label: "Working",
-          icon: "working" as const,
-          // No shimmer: a label that animates forever is noise in a sidebar
-          // full of them (and repaints every vsync on high-refresh displays).
-          // Working is a background state, so it rests at the dim end of what
-          // the old pulse cycled through; only the thread you have open gets
-          // the label at full strength.
-          className: cn("text-sky-600 dark:text-sky-400", !props.isActive && "opacity-75"),
+          // Monitoring is calm background presence, not active progress
+          // (monitoring-pill D6), so it keeps the label at full strength.
+          label: "Monitoring",
+          icon: null,
+          className: "text-sky-600 dark:text-sky-400",
         }
-      : status === "monitoring"
+      : status === "approval"
         ? {
-            // Monitoring is calm background presence, not active progress
-            // (monitoring-pill D6), so it keeps the label at full strength.
-            label: "Monitoring",
+            label: "Approval",
             icon: null,
-            className: "text-sky-600 dark:text-sky-400",
+            className: "text-amber-700 dark:text-amber-300",
           }
-        : status === "approval"
+        : status === "input"
           ? {
-              label: "Approval",
+              label: "Input",
               icon: null,
-              className: "text-amber-700 dark:text-amber-300",
+              className: "text-indigo-600 dark:text-indigo-300",
             }
-          : status === "input"
+          : status === "failed"
             ? {
-                label: "Input",
+                label: "Failed",
                 icon: null,
-                className: "text-indigo-600 dark:text-indigo-300",
+                className: "text-red-700 dark:text-red-300",
               }
-            : status === "failed"
+            : isWoke
               ? {
-                  label: "Failed",
-                  icon: null,
-                  className: "text-red-700 dark:text-red-300",
+                  label: "Woke",
+                  icon: "woke" as const,
+                  className: "text-amber-700 dark:text-amber-300",
                 }
-              : isWoke
+              : isUnread
                 ? {
-                    label: "Woke",
-                    icon: "woke" as const,
-                    className: "text-amber-700 dark:text-amber-300",
+                    label: "Done",
+                    icon: "done" as const,
+                    className: "text-emerald-700 dark:text-emerald-300",
                   }
-                : isUnread
-                  ? {
-                      label: "Done",
-                      icon: "done" as const,
-                      className: "text-emerald-700 dark:text-emerald-300",
-                    }
-                  : null;
+                : null;
   const isWokeStatus = topStatus?.icon === "woke";
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
@@ -1164,7 +1129,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       "opacity-70 transition-opacity hover:opacity-100",
   );
 
-  const title = isRenaming ? (
+  // One line at rest; the branch line comes back only when the row is the
+  // one you are on, one you selected, or one that is doing something.
+  const showDetails = props.isActive || isSelected || isInFlight;
+  // Titles lean toward their provider's hue so a glance tells them apart.
+  const titleColor = resolveProviderTitleColor({
+    driverKind,
+    accentColor: providerEntry?.accentColor,
+  });
+  const isGlowing = status === "working" && variant === "card";
+  const plainTitle = isRenaming ? (
     <input
       autoFocus
       value={renamingTitle}
@@ -1180,7 +1154,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) : (
     <span
       className={cn(
-        "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
+        isGlowing
+          ? "block text-[13px]"
+          : "min-w-0 flex-1 text-[13px] transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
         variant === "card"
           ? cn(
@@ -1201,12 +1177,37 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   ? "text-muted-foreground"
                   : "text-secondary-label/70",
             ),
+        // Glowing titles sit in a faint wash of the sweep color so the
+        // sweep reads as light passing over sky, not over grey.
+        isGlowing && "text-sky-700/55 dark:text-sky-400/45",
         isRegeneratingTitle && "opacity-[0.55]",
       )}
+      style={!isGlowing && titleColor ? { color: titleColor } : undefined}
     >
       {thread.title}
     </span>
   );
+  // Working cards say so with the title itself: the chat's live-activity
+  // sweep runs over it in the working hue instead of a "Working" label.
+  // Transform-only, so it stays on the compositor like the chat's does.
+  const title =
+    !isGlowing || isRenaming ? (
+      plainTitle
+    ) : (
+      <span className="relative min-w-0 flex-1 overflow-hidden">
+        {plainTitle}
+        <span
+          aria-hidden
+          className="live-activity-focus live-activity-focus-wide pointer-events-none absolute inset-y-0 select-none"
+        >
+          <span className="live-activity-focus-counter block">
+            <span className="live-activity-focus-aligned block truncate text-[13px] font-medium text-sky-600 dark:text-sky-400">
+              {thread.title}
+            </span>
+          </span>
+        </span>
+      </span>
+    );
 
   // A real link so cmd/ctrl+click and middle-click open the host in the
   // browser. A plain click still opens T3's pull request view.
@@ -1243,6 +1244,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <TerminalIcon className={cn("size-3.5", terminalStatus.pulse && "animate-status-pulse")} />
     </span>
   ) : null;
+  // The relative time is hover-only on cards: at rest the title gets the
+  // width. It slides in with the actions, and stands alone when a server
+  // offers no actions to slide in with.
+  const hoverTimeLabel = topStatus ? null : (
+    <span
+      className={cn(
+        "me-1.5 flex items-center self-center text-xs tabular-nums text-secondary-label transition-[opacity,translate] duration-150 motion-reduce:transition-none",
+        "-translate-x-1 opacity-0 group-hover/sidebar-row:translate-x-0 group-hover/sidebar-row:opacity-100",
+      )}
+    >
+      {threadTimeLabel(thread)}
+    </span>
+  );
   const pinIndicator = props.isPinned ? (
     props.pinningSupported ? (
       <Tooltip>
@@ -1434,7 +1448,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
       {...(sortable?.listeners ?? {})}
       className={cn(
-        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_36px]",
         sortable?.isDragging && "z-20 opacity-80",
       )}
     >
@@ -1455,34 +1469,23 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          {/* Two lines: the project section header above the card already
+              names the project, so the card spends its height on the title
+              and the branch line only. */}
+          <div className="relative z-10 px-[var(--sidebar-row-content-inset)] py-1.5">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                projectName={props.projectTitle ?? ""}
-                faviconPath={props.projectFaviconPath}
-                projectIcon={props.projectIcon}
-                className="size-4 shrink-0"
-              />
-              {props.projectTitle ? (
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
-                  )}
-                >
-                  {props.projectTitle}
+              {title}
+              {isRegeneratingTitle ? (
+                <span role="status" className="sr-only">
+                  Regenerating title
                 </span>
-              ) : (
-                <span className="flex-1" />
-              )}
+              ) : null}
               {pinIndicator}
               {/* The visible state owns this slot's width: status at rest,
                   actions on hover/keyboard focus or while the popover is open. Keeping
                   the hidden state out of flow lets the project label reclaim
                   space without either state overlapping it. */}
-              <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
+              <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-0 shrink-0 items-stretch justify-end text-xs">
                 {/* Read-only status labels yield to the hover actions. Woke is
                     itself an action, so it stays pointer-enabled and visible
                     while the other controls appear beside it. */}
@@ -1523,25 +1526,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                           topStatus.className,
                         )}
                       >
-                        {topStatus.icon === "working" ? (
-                          <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
-                        ) : topStatus.icon === "done" ? (
+                        {topStatus.icon === "done" ? (
                           <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
                         ) : null}
                         {/* The label alone is the live region: a role="status"
                             wrapper around the ticking duration would make
                             screen readers announce every second. */}
                         <span role="status">{topStatus.label}</span>
-                        {status === "working" ? (
-                          <span aria-hidden>
-                            <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
-                          </span>
-                        ) : null}
                       </span>
                     )
-                  ) : (
-                    threadTimeLabel(thread)
-                  )}
+                  ) : null}
                 </span>
                 {props.settlementSupported || showSnoozeButton ? (
                   <span
@@ -1555,6 +1549,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       snoozeMenuOpen && "pointer-events-auto static opacity-100",
                     )}
                   >
+                    {hoverTimeLabel}
                     {showSnoozeButton ? (
                       <SnoozePopoverButton
                         open={snoozeMenuOpen}
@@ -1582,69 +1577,69 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       </Tooltip>
                     ) : null}
                   </span>
-                ) : null}
+                ) : (
+                  hoverTimeLabel
+                )}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
-              {title}
-              {isRegeneratingTitle ? (
-                <span role="status" className="sr-only">
-                  Regenerating title
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-              {/* Always the branch. The plan step used to take this slot while
+            {showDetails ? (
+              <div className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+                {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
-                <>
-                  <ThreadWorktreeIndicator thread={thread} />
-                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
-                </>
-              ) : (
-                <span className="flex-1" />
-              )}
-              {terminalStatusIcon}
-              {prBadge}
-              {diff ? (
-                <span className="shrink-0 font-mono">
-                  <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>{" "}
-                  <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
+                {thread.branch ? (
+                  <>
+                    <ThreadWorktreeIndicator thread={thread} />
+                    <span className="min-w-0 flex-1 truncate whitespace-nowrap">
+                      {thread.branch}
+                    </span>
+                  </>
+                ) : (
+                  <span className="flex-1" />
+                )}
+                {terminalStatusIcon}
+                {prBadge}
+                {diff ? (
+                  <span className="shrink-0 font-mono">
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                      +{diff.insertions}
+                    </span>{" "}
+                    <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
+                  </span>
+                ) : null}
+                <span
+                  aria-hidden
+                  className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
+                >
+                  {isRemote ? (
+                    <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
+                      <EnvironmentMachineIcon
+                        aria-hidden
+                        kind={props.environmentMachine}
+                        className="size-3.5"
+                      />
+                    </span>
+                  ) : null}
+                  {driverKind ? (
+                    <span className="inline-flex shrink-0 items-center">
+                      <ProviderInstanceIcon
+                        driverKind={driverKind}
+                        displayName={
+                          providerEntry?.displayName ??
+                          thread.session?.providerName ??
+                          modelInstanceId
+                        }
+                        accentColor={providerEntry?.accentColor}
+                        showBadge={showInstanceBadge}
+                        // Glyph dims, badge stays saturated; offset matches the composer trigger.
+                        iconClassName="size-3.5 opacity-60"
+                        badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
+                      />
+                    </span>
+                  ) : null}
                 </span>
-              ) : null}
-              <span
-                aria-hidden
-                className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
-              >
-                {isRemote ? (
-                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    <EnvironmentMachineIcon
-                      aria-hidden
-                      kind={props.environmentMachine}
-                      className="size-3.5"
-                    />
-                  </span>
-                ) : null}
-                {driverKind ? (
-                  <span className="inline-flex shrink-0 items-center">
-                    <ProviderInstanceIcon
-                      driverKind={driverKind}
-                      displayName={
-                        providerEntry?.displayName ??
-                        thread.session?.providerName ??
-                        modelInstanceId
-                      }
-                      accentColor={providerEntry?.accentColor}
-                      showBadge={showInstanceBadge}
-                      // Glyph dims, badge stays saturated; offset matches the composer trigger.
-                      iconClassName="size-3.5 opacity-60"
-                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
-                    />
-                  </span>
-                ) : null}
-              </span>
-            </div>
+              </div>
+            ) : null}
           </div>
           {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
         </TooltipTrigger>
@@ -2017,77 +2012,17 @@ export default function Sidebar() {
 
   const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
 
-  // Project scope: one menu above the list. Scoping filters the list without
-  // making the header width depend on the number or length of project names.
-  const [projectScopeKey, setProjectScopeKey] = useState<string | null>(null);
-  // {value, label} items let Base UI drive the combobox selection contract
-  // while the popup search filters the same collection.
-  const projectScopeItems = useMemo(
-    () => [
-      { value: "all", label: "All projects" },
-      ...projectGroups.map((project) => ({
-        value: project.projectKey,
-        label: project.displayName,
-      })),
-    ],
-    [projectGroups],
-  );
-  const projectGroupByScopeKey = useMemo(
-    () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
-    [projectGroups],
-  );
-  const selectedProjectScopeItem = useMemo(
-    () =>
-      projectScopeItems.find((item) => item.value === (projectScopeKey ?? "all")) ??
-      projectScopeItems[0]!,
-    [projectScopeItems, projectScopeKey],
-  );
-  const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
-    reduceSidebarProjectScopeMenuState,
-    { open: false, query: "" },
-  );
-  const projectScopeFilter = useComboboxFilter();
-  // Filtering derives from the same React state that controls the input, so
-  // the visible query and the visible list can never desync — the peer wiring
-  // in DiffPanel and BranchToolbarBranchSelector. "All projects" is a scope
-  // reset, not a searchable entry: it only shows while a project scope is
-  // active (there is something to reset) and the query is empty, so it can't
-  // outrank a project match under autoHighlight and no-hit queries reach the
-  // empty state.
-  const filteredProjectScopeItems = useMemo(
-    () =>
-      filterSidebarProjectScopeItems({
-        items: projectScopeItems,
-        activeScopeKey: projectScopeKey,
-        query: projectScopeMenuState.query,
-        matches: (item, query) =>
-          projectScopeFilter.contains(item, query, (candidate) => candidate.label),
-      }),
-    [projectScopeFilter, projectScopeItems, projectScopeKey, projectScopeMenuState.query],
-  );
-  const scopedProjectGroup = useMemo(
-    () =>
-      projectScopeKey === null
-        ? null
-        : (projectGroups.find((project) => project.projectKey === projectScopeKey) ?? null),
-    [projectGroups, projectScopeKey],
-  );
-  const scopedProjectKeys = useMemo(
-    () =>
-      scopedProjectGroup === null
-        ? null
-        : new Set(
-            scopedProjectGroup.memberProjectRefs.map(
-              (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
-            ),
-          ),
-    [scopedProjectGroup],
-  );
-  useEffect(() => {
-    if (projectScopeKey !== null && scopedProjectGroup === null) {
-      setProjectScopeKey(null);
-    }
-  }, [projectScopeKey, scopedProjectGroup]);
+  // Project search: one field above the list. The query narrows which
+  // project sections show (display name or repo folder, fuzzy). Exactly one
+  // hit behaves like a scope: headers hide and new threads land in it.
+  // No project scope any more: thread search covers narrowing, and every
+  // project keeps its section. The scope names stay so the rest of the
+  // sidebar reads unchanged.
+  // Typed through useMemo so TypeScript keeps the nullable type instead of
+  // narrowing the constants to `null` at every use.
+  const scopedProjectGroup = useMemo<SidebarProjectSnapshot | null>(() => null, []);
+  const projectScopeKey = scopedProjectGroup?.projectKey ?? null;
+  const scopedProjectKeys = useMemo<ReadonlySet<string> | null>(() => null, []);
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -2132,11 +2067,19 @@ export default function Sidebar() {
     },
     [isMobile, router, setOpenMobile],
   );
+  const handleNewThreadInProject = useCallback(
+    (projectGroup: SidebarProjectSnapshot) => {
+      if (isMobile) setOpenMobile(false);
+      void newThreadContext.handleNewThread(
+        scopeProjectRef(projectGroup.environmentId, projectGroup.id),
+      );
+    },
+    [isMobile, newThreadContext, setOpenMobile],
+  );
   const handleProjectSettings = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
       event.preventDefault();
       event.stopPropagation();
-      dispatchProjectScopeMenu({ type: "project-settings-opened" });
       openProjectSettings(projectGroup);
     },
     [openProjectSettings],
@@ -2268,7 +2211,7 @@ export default function Sidebar() {
   // filter context changes so a scope/search flip never inherits a deep
   // page state.
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const settledResetKey = projectScopeKey ?? "all";
+  const settledResetKey = "all";
   const lastSettledResetKeyRef = useRef(settledResetKey);
   if (lastSettledResetKeyRef.current !== settledResetKey) {
     lastSettledResetKeyRef.current = settledResetKey;
@@ -2341,9 +2284,63 @@ export default function Sidebar() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  // The inbox is one accordion section per logical project. Headers only
+  // earn their space when there is more than one project to tell apart and
+  // the scope filter isn't already doing that job.
+  const showProjectSectionHeaders = projectGroups.length > 1;
+  const [collapsedProjectSectionKeys, setCollapsedProjectSectionKeys] = useLocalStorage(
+    COLLAPSED_PROJECT_SECTIONS_KEY,
+    NO_COLLAPSED_PROJECT_SECTIONS,
+    CollapsedProjectSectionKeys,
+  );
+  const toggleProjectSection = useCallback(
+    (projectKey: string) =>
+      setCollapsedProjectSectionKeys((keys) => toggleCollapsedProjectSection(keys, projectKey)),
+    [setCollapsedProjectSectionKeys],
+  );
+  const projectSections = useMemo(
+    () =>
+      buildSidebarProjectSections({
+        projects: projectGroups,
+        pinnedThreads,
+        activeThreads,
+      }).map((section) => {
+        const expanded =
+          !showProjectSectionHeaders ||
+          section.projectKey === null ||
+          !collapsedProjectSectionKeys.includes(section.projectKey);
+        const threads = [...section.pinnedThreads, ...section.activeThreads];
+        return {
+          ...section,
+          expanded,
+          threadCount: threads.length,
+          // Only a closed header needs the rolled-up signal; open rows speak
+          // for themselves.
+          attention: expanded ? null : resolveProjectSectionAttention(threads),
+          visibleThreads: resolveVisibleSectionThreads({
+            expanded,
+            threads,
+            routeThreadKey,
+            threadKey: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          }),
+        };
+      }),
+    [
+      activeThreads,
+      collapsedProjectSectionKeys,
+      pinnedThreads,
+      routeThreadKey,
+      showProjectSectionHeaders,
+      projectGroups,
+    ],
+  );
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...projectSections.flatMap((section) => section.visibleThreads),
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [projectSections, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -3500,15 +3497,75 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  // Pinned to the header's right edge, mirroring the collapse control on the
+  // left: the two ways to add something to the sidebar.
+  const headerActions = (
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <SidebarMenuButton
+              size="icon"
+              type="button"
+              className="relative size-7 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+              onClick={handleNewThreadClick}
+              disabled={projects.length === 0}
+              aria-label="New thread"
+            />
+          }
+        >
+          <SquarePenIcon />
+          <span
+            className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
+            aria-hidden="true"
+          />
+        </TooltipTrigger>
+        <TooltipPopup side="right">
+          {projectGroups.length > 1 ? (
+            <span className="flex flex-col gap-0.5">
+              <span>
+                {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+              </span>
+              <span className="text-muted-foreground">
+                New thread in current project: Shift+click
+                {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
+              </span>
+            </span>
+          ) : newThreadShortcutLabel ? (
+            `New thread (${newThreadShortcutLabel})`
+          ) : (
+            "New thread"
+          )}
+        </TooltipPopup>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <SidebarMenuButton
+              size="icon"
+              className="relative size-7 shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+              onClick={openAddProjectCommandPalette}
+              type="button"
+              aria-label="New project"
+            />
+          }
+        >
+          <FolderPlusIcon />
+        </TooltipTrigger>
+        <TooltipPopup side="bottom">New project</TooltipPopup>
+      </Tooltip>
+    </>
+  );
   return (
     <>
-      <SidebarChromeHeader isElectron={isElectron} />
+      <SidebarChromeHeader isElectron={isElectron} actions={headerActions} />
       <SidebarContent
         className="gap-0"
         fixedHeader={
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
-          <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)]">
+          <SidebarGroup className="relative z-[1] gap-1 border-b border-sidebar-border p-[var(--sidebar-content-inset)] pb-[calc(var(--sidebar-content-inset)+2px)]">
             <div className="flex items-center gap-1">
               <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
                 <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
@@ -3556,195 +3613,11 @@ export default function Sidebar() {
                   </Button>
                 ) : null}
               </div>
-              <div className="shrink-0">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        size="icon"
-                        type="button"
-                        className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        onClick={handleNewThreadClick}
-                        disabled={projects.length === 0}
-                        aria-label="New thread"
-                      />
-                    }
-                  >
-                    <SquarePenIcon />
-                    <span
-                      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-                      aria-hidden="true"
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup side="right">
-                    {projectGroups.length > 1 ? (
-                      <span className="flex flex-col gap-0.5">
-                        <span>
-                          {newThreadShortcutLabel
-                            ? `New thread (${newThreadShortcutLabel})`
-                            : "New thread"}
-                        </span>
-                        <span className="text-muted-foreground">
-                          New thread in current project: Shift+click
-                          {newThreadInProjectShortcutLabel
-                            ? ` (${newThreadInProjectShortcutLabel})`
-                            : ""}
-                        </span>
-                      </span>
-                    ) : newThreadShortcutLabel ? (
-                      `New thread (${newThreadShortcutLabel})`
-                    ) : (
-                      "New thread"
-                    )}
-                  </TooltipPopup>
-                </Tooltip>
-              </div>
             </div>
-            {projectGroups.length > 0 ? (
-              <div className="flex items-center gap-1">
-                <Combobox
-                  items={projectScopeItems}
-                  filteredItems={filteredProjectScopeItems}
-                  autoHighlight
-                  itemToStringLabel={(item) => item.label}
-                  isItemEqualToValue={(a, b) => a.value === b.value}
-                  open={projectScopeMenuState.open}
-                  onOpenChange={(open) => {
-                    dispatchProjectScopeMenu({ type: "open-changed", open });
-                  }}
-                  value={selectedProjectScopeItem}
-                  onValueChange={(item) => {
-                    if (!item) return;
-                    setProjectScopeKey(item.value === "all" ? null : item.value);
-                  }}
-                >
-                  <ComboboxTrigger
-                    render={
-                      <SidebarMenuButton
-                        aria-label="Filter threads by project"
-                        className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                      />
-                    }
-                  >
-                    {scopedProjectGroup ? (
-                      <span className="flex shrink-0">
-                        <ProjectFavicon
-                          environmentId={scopedProjectGroup.environmentId}
-                          cwd={scopedProjectGroup.workspaceRoot}
-                          projectName={scopedProjectGroup.displayName}
-                          faviconPath={scopedProjectGroup.faviconPath}
-                          projectIcon={scopedProjectGroup.projectIcon}
-                          className="size-4"
-                        />
-                      </span>
-                    ) : (
-                      <FolderIcon className="size-4 shrink-0" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate">
-                      {scopedProjectGroup?.displayName ?? "All projects"}
-                    </span>
-                    <ChevronDownIcon className="-mr-px size-4 shrink-0" />
-                  </ComboboxTrigger>
-                  <ComboboxPopup
-                    align="start"
-                    className="w-(--anchor-width) min-w-0 overflow-hidden"
-                  >
-                    <div className="shrink-0 px-3 pt-2.5">
-                      <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
-                        <SearchIcon
-                          aria-hidden="true"
-                          className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
-                        />
-                        <ComboboxInput
-                          aria-label="Search projects"
-                          className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
-                          inputClassName="rounded-none bg-transparent text-sm"
-                          placeholder="Search projects..."
-                          showTrigger={false}
-                          size="sm"
-                          unstyled
-                          value={projectScopeMenuState.query}
-                          onChange={(event) =>
-                            dispatchProjectScopeMenu({
-                              type: "query-changed",
-                              query: event.target.value,
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
-                    <ComboboxEmpty>No matching projects.</ComboboxEmpty>
-                    <ComboboxList>
-                      {(item: (typeof projectScopeItems)[number]) => {
-                        const project = projectGroupByScopeKey.get(item.value) ?? null;
-                        return (
-                          <ComboboxItem
-                            key={item.value}
-                            hideIndicator
-                            value={item}
-                            className="h-8 min-h-8 py-0 font-medium"
-                            contentClassName="flex min-w-0 items-center gap-2"
-                          >
-                            {project ? (
-                              <ProjectFavicon
-                                environmentId={project.environmentId}
-                                cwd={project.workspaceRoot}
-                                projectName={project.displayName}
-                                faviconPath={project.faviconPath}
-                                projectIcon={project.projectIcon}
-                                className="size-4 shrink-0"
-                              />
-                            ) : (
-                              <FolderIcon className="size-4 shrink-0" />
-                            )}
-                            <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
-                            {project ? (
-                              <Button
-                                size="icon-xs"
-                                variant="ghost-muted"
-                                aria-label={`Project settings for ${project.displayName}`}
-                                title={`Project settings for ${project.displayName}`}
-                                className="ml-auto size-6 [--control-icon-color:currentColor] text-icon-muted focus-visible:bg-accent focus-visible:text-foreground"
-                                onPointerDown={(event) => event.stopPropagation()}
-                                onClick={(event) => {
-                                  void handleProjectSettings(event, project);
-                                }}
-                              >
-                                <SettingsIcon className="size-3.5" />
-                              </Button>
-                            ) : null}
-                          </ComboboxItem>
-                        );
-                      }}
-                    </ComboboxList>
-                  </ComboboxPopup>
-                </Combobox>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        size="icon"
-                        className="relative shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        onClick={openAddProjectCommandPalette}
-                        type="button"
-                        aria-label="New project"
-                      />
-                    }
-                  >
-                    <FolderPlusIcon />
-                    <span
-                      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-                      aria-hidden="true"
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup side="right">New project</TooltipPopup>
-                </Tooltip>
-              </div>
-            ) : null}
           </SidebarGroup>
         }
       >
-        <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
+        <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-2">
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -3949,58 +3822,91 @@ export default function Sidebar() {
                       routeDraftId={routeDraftIdForRows}
                       onNavigateToDraft={navigateToDraft}
                     />,
-                    pinnedThreads.length > 0 ? (
-                      <li key="pinned-dnd" className="list-none">
-                        <DndContext
-                          sensors={pinnedDndSensors}
-                          collisionDetection={closestCenter}
-                          modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
-                          onDragEnd={handlePinnedDragEnd}
-                        >
-                          <SortableContext
-                            items={orderedPinnedThreads
-                              .map((thread) =>
-                                scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-                              )
-                              .filter((threadKey) => reorderablePinnedKeys.has(threadKey))}
-                            strategy={verticalListSortingStrategy}
-                          >
-                            <ul
-                              role="list"
-                              aria-label="Pinned threads"
-                              className="flex flex-col gap-px"
-                            >
-                              {orderedPinnedThreads.map((thread) => {
-                                const threadKey = scopedThreadKey(
-                                  scopeThreadRef(thread.environmentId, thread.id),
-                                );
-                                if (!reorderablePinnedKeys.has(threadKey)) {
-                                  return renderThreadRow(thread, "pinned");
-                                }
-                                return (
-                                  <SortablePinnedThreadRow key={threadKey} id={threadKey}>
-                                    {(bag) => renderThreadRow(thread, "pinned", bag)}
-                                  </SortablePinnedThreadRow>
-                                );
-                              })}
-                            </ul>
-                          </SortableContext>
-                        </DndContext>
-                      </li>
-                    ) : null,
                   ];
-                  if (pinnedThreads.length > 0) {
-                    items.push(
-                      <li
-                        key="pinned-divider"
-                        aria-hidden
-                        data-testid="sidebar-pinned-divider"
-                        className="mx-2.5 my-1.5 h-px list-none bg-sidebar-border/60"
-                      />,
+                  // One section per project. Pinned rows lead their section
+                  // in the one shared pinned order; only reorder-capable rows
+                  // register as sortable (legacy-server pins render in place
+                  // as plain rows). Dragging stays within a section, and the
+                  // global order handler already moves keys relative to each
+                  // other, so a within-section drop keeps every other
+                  // section's relative order intact.
+                  for (const section of projectSections) {
+                    const visibleKeys = new Set(
+                      section.visibleThreads.map((thread) =>
+                        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                      ),
                     );
-                  }
-                  for (const thread of activeThreads) {
-                    items.push(renderThreadRow(thread, "active"));
+                    const sectionPinned = orderedPinnedThreads.filter((thread) =>
+                      visibleKeys.has(
+                        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                      ),
+                    );
+                    const pinnedKeys = new Set(
+                      sectionPinned.map((thread) =>
+                        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                      ),
+                    );
+                    const sectionActive = section.visibleThreads.filter(
+                      (thread) =>
+                        !pinnedKeys.has(
+                          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+                        ),
+                    );
+                    items.push(
+                      <SidebarProjectSection
+                        key={`project-section:${section.projectKey ?? "unmapped"}`}
+                        project={showProjectSectionHeaders ? section.project : null}
+                        expanded={section.expanded}
+                        threadCount={section.threadCount}
+                        attention={section.attention}
+                        onToggle={toggleProjectSection}
+                        onOpenSettings={handleProjectSettings}
+                        onNewThread={handleNewThreadInProject}
+                        attachList={attachListAutoAnimateRef}
+                      >
+                        {sectionPinned.length > 0 ? (
+                          <li key="pinned-dnd" className="list-none">
+                            <DndContext
+                              sensors={pinnedDndSensors}
+                              collisionDetection={closestCenter}
+                              modifiers={[
+                                restrictToVerticalAxis,
+                                restrictToFirstScrollableAncestor,
+                              ]}
+                              onDragEnd={handlePinnedDragEnd}
+                            >
+                              <SortableContext
+                                items={[...pinnedKeys].filter((threadKey) =>
+                                  reorderablePinnedKeys.has(threadKey),
+                                )}
+                                strategy={verticalListSortingStrategy}
+                              >
+                                <ul
+                                  role="list"
+                                  aria-label="Pinned threads"
+                                  className="flex flex-col gap-px"
+                                >
+                                  {sectionPinned.map((thread) => {
+                                    const threadKey = scopedThreadKey(
+                                      scopeThreadRef(thread.environmentId, thread.id),
+                                    );
+                                    if (!reorderablePinnedKeys.has(threadKey)) {
+                                      return renderThreadRow(thread, "pinned");
+                                    }
+                                    return (
+                                      <SortablePinnedThreadRow key={threadKey} id={threadKey}>
+                                        {(bag) => renderThreadRow(thread, "pinned", bag)}
+                                      </SortablePinnedThreadRow>
+                                    );
+                                  })}
+                                </ul>
+                              </SortableContext>
+                            </DndContext>
+                          </li>
+                        ) : null}
+                        {sectionActive.map((thread) => renderThreadRow(thread, "active"))}
+                      </SidebarProjectSection>,
+                    );
                   }
                   // Snoozed shelf: between the inbox and Settled — out of the
                   // way, never gone. The header always renders while anything

@@ -484,6 +484,34 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/* Wider sweep for the sidebar: the band is about twice the chat's, so it reads
+   on a 13px title at a glance instead of as a glint. */
+@utility live-activity-focus-wide {
+  --live-activity-focus-width: 10rem;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    rgb(0 0 0 / 12%) 1.5rem,
+    rgb(0 0 0 / 55%) 3.5rem,
+    black 5rem,
+    rgb(0 0 0 / 55%) 6.5rem,
+    rgb(0 0 0 / 12%) 8.5rem,
+    transparent var(--live-activity-focus-width),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    rgb(0 0 0 / 12%) 1.5rem,
+    rgb(0 0 0 / 55%) 3.5rem,
+    black 5rem,
+    rgb(0 0 0 / 55%) 6.5rem,
+    rgb(0 0 0 / 12%) 8.5rem,
+    transparent var(--live-activity-focus-width),
+    transparent 100%
+  );
+}
+
 @utility live-activity-focus-counter {
   width: 100%;
   animation: live-activity-focus-counter 2.2s linear infinite;

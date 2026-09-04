@@ -1019,3 +1019,145 @@ export function sortScopedProjectsForSidebar<
       left.id.localeCompare(right.id),
   );
 }
+
+/**
+ * Project accordion sections for the sidebar inbox. Each logical project
+ * gets one section in the given (already sorted) order, holding its pinned
+ * and active threads in their existing global orders. Empty sections are
+ * kept so the sidebar still lists every project in scope. Threads whose
+ * project is not among the groups (a scope/group race) collect in one
+ * trailing headerless section rather than vanish.
+ */
+export interface SidebarProjectSection<TProject, TThread> {
+  readonly projectKey: string | null;
+  readonly project: TProject | null;
+  readonly pinnedThreads: readonly TThread[];
+  readonly activeThreads: readonly TThread[];
+}
+
+export function buildSidebarProjectSections<
+  TProject extends {
+    projectKey: string;
+    memberProjectRefs: LogicalSidebarProject["memberProjectRefs"];
+  },
+  TThread extends { environmentId: string; projectId: string },
+>(input: {
+  projects: readonly TProject[];
+  pinnedThreads: readonly TThread[];
+  activeThreads: readonly TThread[];
+}): SidebarProjectSection<TProject, TThread>[] {
+  const groupKeyByProjectRef = new Map(
+    input.projects.flatMap((project) =>
+      project.memberProjectRefs.map(
+        (projectRef) =>
+          [`${projectRef.environmentId}\0${projectRef.projectId}`, project.projectKey] as const,
+      ),
+    ),
+  );
+  const pinnedByKey = new Map<string | null, TThread[]>();
+  const activeByKey = new Map<string | null, TThread[]>();
+  const bucket = (map: Map<string | null, TThread[]>, thread: TThread) => {
+    const key = groupKeyByProjectRef.get(`${thread.environmentId}\0${thread.projectId}`) ?? null;
+    const existing = map.get(key);
+    if (existing) {
+      existing.push(thread);
+    } else {
+      map.set(key, [thread]);
+    }
+  };
+  for (const thread of input.pinnedThreads) bucket(pinnedByKey, thread);
+  for (const thread of input.activeThreads) bucket(activeByKey, thread);
+
+  const sections = input.projects.map((project): SidebarProjectSection<TProject, TThread> => ({
+    projectKey: project.projectKey,
+    project,
+    pinnedThreads: pinnedByKey.get(project.projectKey) ?? [],
+    activeThreads: activeByKey.get(project.projectKey) ?? [],
+  }));
+  const orphanPinned = pinnedByKey.get(null) ?? [];
+  const orphanActive = activeByKey.get(null) ?? [];
+  if (orphanPinned.length > 0 || orphanActive.length > 0) {
+    sections.push({
+      projectKey: null,
+      project: null,
+      pinnedThreads: orphanPinned,
+      activeThreads: orphanActive,
+    });
+  }
+  return sections;
+}
+
+export function toggleCollapsedProjectSection(
+  collapsedKeys: readonly string[],
+  projectKey: string,
+): string[] {
+  return collapsedKeys.includes(projectKey)
+    ? collapsedKeys.filter((key) => key !== projectKey)
+    : [...collapsedKeys, projectKey];
+}
+
+/**
+ * Rows a section renders. Expanded sections show everything; a collapsed
+ * section still shows the open thread's row (same rule as the Settled and
+ * Snoozed shelves) so the route never hides behind a header.
+ */
+export function resolveVisibleSectionThreads<TThread>(input: {
+  expanded: boolean;
+  threads: readonly TThread[];
+  routeThreadKey: string | null;
+  threadKey: (thread: TThread) => string;
+}): readonly TThread[] {
+  if (input.expanded) return input.threads;
+  if (input.routeThreadKey === null) return [];
+  const routeThread = input.threads.find(
+    (thread) => input.threadKey(thread) === input.routeThreadKey,
+  );
+  return routeThread === undefined ? [] : [routeThread];
+}
+
+// Attention shown on a collapsed section header, highest priority first.
+// Mirrors the per-row status hues so the dot means the same as the label
+// it stands in for; "ready"/"monitoring" don't surface (nothing to do).
+const PROJECT_SECTION_ATTENTION_PRIORITY = ["failed", "approval", "input", "working"] as const;
+export type SidebarProjectSectionAttention = (typeof PROJECT_SECTION_ATTENTION_PRIORITY)[number];
+
+export function resolveProjectSectionAttention(
+  threads: readonly SidebarThreadStatusInput[],
+): SidebarProjectSectionAttention | null {
+  let best: number = PROJECT_SECTION_ATTENTION_PRIORITY.length;
+  for (const thread of threads) {
+    const status = resolveSidebarThreadStatus(thread);
+    const rank = PROJECT_SECTION_ATTENTION_PRIORITY.indexOf(
+      status as SidebarProjectSectionAttention,
+    );
+    if (rank !== -1 && rank < best) best = rank;
+    if (best === 0) break;
+  }
+  return best === PROJECT_SECTION_ATTENTION_PRIORITY.length
+    ? null
+    : PROJECT_SECTION_ATTENTION_PRIORITY[best]!;
+}
+
+// Brand hues threads lean toward so a glance tells providers apart. A
+// per-instance accent (user-chosen in provider settings) takes precedence.
+const PROVIDER_BRAND_HUE: Record<string, string> = {
+  claudeAgent: "#d97757",
+  codex: "#10a37f",
+  cursor: "#6366f1",
+  grok: "#5b8db8",
+  opencode: "#f2a11a",
+  antigravity: "#4285f4",
+};
+
+/**
+ * Title color for a thread row: the current text color pulled 28% toward
+ * the provider's hue. Null when the provider is unknown, so the row keeps
+ * its plain color instead of a wrong one.
+ */
+export function resolveProviderTitleColor(input: {
+  driverKind: string | null;
+  accentColor: string | null | undefined;
+}): string | null {
+  const hue = input.accentColor ?? (input.driverKind ? PROVIDER_BRAND_HUE[input.driverKind] : null);
+  return hue ? `color-mix(in srgb, ${hue} 28%, currentColor)` : null;
+}

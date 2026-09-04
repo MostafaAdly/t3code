@@ -308,7 +308,11 @@ function Sidebar({
           {...props}
         >
           <div
-            className="flex h-full w-full flex-col bg-sidebar surface-grain group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm/5"
+            // Floating is the inner glass panel: translucent sidebar color over a
+            // backdrop blur, a hairline border and a faint inner highlight so the
+            // edge reads on both themes. Blur repaints only when content behind
+            // it moves, so it costs nothing at rest.
+            className="flex h-full w-full flex-col bg-sidebar surface-grain group-data-[variant=floating]:overflow-hidden group-data-[variant=floating]:rounded-xl group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:bg-sidebar/60 group-data-[variant=floating]:shadow-lg/10 group-data-[variant=floating]:ring-1 group-data-[variant=floating]:ring-inset group-data-[variant=floating]:ring-white/5 group-data-[variant=floating]:backdrop-blur-3xl group-data-[variant=floating]:backdrop-saturate-150"
             data-sidebar="sidebar"
             data-slot="sidebar-inner"
           >
