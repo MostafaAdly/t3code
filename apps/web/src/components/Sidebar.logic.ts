@@ -1161,3 +1161,30 @@ export function resolveProviderTitleColor(input: {
   const hue = input.accentColor ?? (input.driverKind ? PROVIDER_BRAND_HUE[input.driverKind] : null);
   return hue ? `color-mix(in srgb, ${hue} 28%, currentColor)` : null;
 }
+
+/**
+ * Next collapsed-key set for the expand/collapse-all control. Collapsing
+ * stores every project key; expanding clears the set. Keys of projects that
+ * no longer exist are dropped either way, so the stored list cannot grow
+ * stale.
+ */
+export function setAllProjectSectionsCollapsed(
+  projectKeys: readonly string[],
+  collapsed: boolean,
+): string[] {
+  return collapsed ? [...projectKeys] : [];
+}
+
+/**
+ * True when every section is already collapsed, which is what the control
+ * uses to decide its direction and icon. No sections means nothing to
+ * collapse, so it reads as expanded.
+ */
+export function areAllProjectSectionsCollapsed(
+  projectKeys: readonly string[],
+  collapsedKeys: readonly string[],
+): boolean {
+  if (projectKeys.length === 0) return false;
+  const collapsed = new Set(collapsedKeys);
+  return projectKeys.every((key) => collapsed.has(key));
+}

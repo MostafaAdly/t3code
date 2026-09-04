@@ -42,6 +42,8 @@ import {
   AlarmClockOffIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronsDownUpIcon,
+  ChevronsUpDownIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   ClockIcon,
@@ -125,6 +127,7 @@ import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animatePinnedLayoutChanges,
+  areAllProjectSectionsCollapsed,
   buildBulkTitleRegenerationContextMenuItem,
   buildSidebarProjectSections,
   firstValidTimestampMs,
@@ -139,6 +142,7 @@ import {
   resolveSidebarThreadStatus,
   resolveVisibleSectionThreads,
   searchSidebarThreadsByTitle,
+  setAllProjectSectionsCollapsed,
   shouldCreateNewThreadInCurrentProject,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
@@ -2298,6 +2302,21 @@ export default function Sidebar() {
       setCollapsedProjectSectionKeys((keys) => toggleCollapsedProjectSection(keys, projectKey)),
     [setCollapsedProjectSectionKeys],
   );
+  const projectSectionKeys = useMemo(
+    () => projectGroups.map((project) => project.projectKey),
+    [projectGroups],
+  );
+  const allProjectSectionsCollapsed = areAllProjectSectionsCollapsed(
+    projectSectionKeys,
+    collapsedProjectSectionKeys,
+  );
+  const toggleAllProjectSections = useCallback(
+    () =>
+      setCollapsedProjectSectionKeys(
+        setAllProjectSectionsCollapsed(projectSectionKeys, !allProjectSectionsCollapsed),
+      ),
+    [allProjectSectionsCollapsed, projectSectionKeys, setCollapsedProjectSectionKeys],
+  );
   const projectSections = useMemo(
     () =>
       buildSidebarProjectSections({
@@ -3501,6 +3520,29 @@ export default function Sidebar() {
   // left: the two ways to add something to the sidebar.
   const headerActions = (
     <>
+      {/* Only meaningful while project headers are on screen. */}
+      {showProjectSectionHeaders ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <SidebarMenuButton
+                size="icon"
+                type="button"
+                className="relative size-7 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                onClick={toggleAllProjectSections}
+                aria-label={
+                  allProjectSectionsCollapsed ? "Expand all projects" : "Collapse all projects"
+                }
+              />
+            }
+          >
+            {allProjectSectionsCollapsed ? <ChevronsUpDownIcon /> : <ChevronsDownUpIcon />}
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            {allProjectSectionsCollapsed ? "Expand all projects" : "Collapse all projects"}
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       <Tooltip>
         <TooltipTrigger
           render={

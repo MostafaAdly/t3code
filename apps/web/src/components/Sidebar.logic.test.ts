@@ -4,7 +4,9 @@ import {
   animatePinnedLayoutChanges,
   archiveSelectedThreadEntries,
   buildSidebarProjectSections,
+  areAllProjectSectionsCollapsed,
   resolveProjectSectionAttention,
+  setAllProjectSectionsCollapsed,
   resolveProviderTitleColor,
   resolveVisibleSectionThreads,
   toggleCollapsedProjectSection,
@@ -1871,5 +1873,23 @@ describe("resolveProviderTitleColor", () => {
   it("returns null for unknown providers so the row keeps its plain color", () => {
     expect(resolveProviderTitleColor({ driverKind: "mystery", accentColor: null })).toBeNull();
     expect(resolveProviderTitleColor({ driverKind: null, accentColor: undefined })).toBeNull();
+  });
+});
+
+describe("project section expand/collapse all", () => {
+  it("collapses every project and expands back to none", () => {
+    expect(setAllProjectSectionsCollapsed(["a", "b"], true)).toEqual(["a", "b"]);
+    expect(setAllProjectSectionsCollapsed(["a", "b"], false)).toEqual([]);
+  });
+
+  it("drops keys of projects that no longer exist", () => {
+    expect(setAllProjectSectionsCollapsed(["a"], true)).toEqual(["a"]);
+  });
+
+  it("reports all-collapsed only when every project is in the set", () => {
+    expect(areAllProjectSectionsCollapsed(["a", "b"], ["a", "b", "gone"])).toBe(true);
+    expect(areAllProjectSectionsCollapsed(["a", "b"], ["a"])).toBe(false);
+    // Nothing to collapse reads as expanded, so the control offers "collapse".
+    expect(areAllProjectSectionsCollapsed([], [])).toBe(false);
   });
 });
