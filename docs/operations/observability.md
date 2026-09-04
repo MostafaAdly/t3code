@@ -31,8 +31,8 @@ Completed spans are written as NDJSON records to `serverTracePath`. The default 
 server starts: production and explicitly configured homes use
 `<home>/userdata/logs/server.trace.ndjson` (so `~/.t3/userdata/...` by default, or
 `/custom/path/userdata/...` with `--home-dir /custom/path`), a linked worktree dev run uses
-`<worktree>/.t3/userdata/logs/server.trace.ndjson`, and an implicit dev run outside a linked
-worktree uses `~/.t3/dev/logs/server.trace.ndjson`.
+`<worktree>/.t3/userdata/logs/server.trace.ndjson`, and a dev run from the main checkout shares
+the installed app's `~/.t3/userdata/logs/server.trace.ndjson`.
 
 Important fields common to both record types:
 
@@ -198,11 +198,8 @@ A dev server started from a linked worktree defaults to that worktree's local ho
 TRACE_FILE="$WORKTREE/.t3/userdata/logs/server.trace.ndjson"
 ```
 
-Only an implicit dev run outside a linked worktree uses the shared dev directory:
-
-```bash
-TRACE_FILE="$HOME/.t3/dev/logs/server.trace.ndjson"
-```
+A dev server started from the main checkout shares the installed app's home, so the first form
+applies to it as well.
 
 Tail the selected file:
 

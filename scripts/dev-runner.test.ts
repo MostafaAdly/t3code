@@ -1303,14 +1303,18 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         }),
       );
 
-      it.effect("leaves the home implicit with no worktree and no ambient value", () =>
+      // The main checkout deliberately shares the installed app's data: an
+      // explicit ~/.t3 lands the server in ~/.t3/userdata, not ~/.t3/dev, so
+      // dev and installed builds show the same projects and threads.
+      it.effect("shares the installed app's ~/.t3 with no worktree and no ambient value", () =>
         Effect.gen(function* () {
+          const path = yield* Path.Path;
           const home = yield* spawnedHome({
             t3Home: undefined,
             cwd: NodeOS.tmpdir(),
             ambientHome: undefined,
           });
-          assert.equal(home, undefined);
+          assert.equal(home, path.join(NodeOS.homedir(), ".t3"));
         }),
       );
     });

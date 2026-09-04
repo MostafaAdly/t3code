@@ -44,10 +44,12 @@ authenticated.
   when `T3CODE_HOME` is set, storing state in `<worktree>/.t3/userdata`. Pass `--home-dir <path>` to
   choose another isolated directory explicitly. Submodules are not worktrees and keep the normal
   precedence.
-- From the **main checkout**, dev commands implicitly use `~/.t3/dev`, keeping development state
-  separate from `~/.t3/userdata`. An explicit `--home-dir <path>` stores state under
-  `<path>/userdata`; the base directory remains available for caches, worktrees, and other shared
-  data.
+- From the **main checkout**, dev commands use the shared `~/.t3` explicitly, so state lives in
+  `~/.t3/userdata`: the same projects and threads the installed app shows. The runner warns when
+  another server already has that directory open, because the two only see each other's changes
+  after a restart. Pass `--home-dir <path>` (or work in a worktree) for isolated state; an explicit
+  path stores state under `<path>/userdata`, with the base directory shared for caches, worktrees,
+  and other common data.
 
 ## Build, check, test
 
