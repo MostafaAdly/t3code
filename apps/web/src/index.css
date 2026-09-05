@@ -1337,10 +1337,6 @@ html[data-theme-id="t3-chat"] {
     & [data-changed-files-state] {
       border-color: transparent;
     }
-
-    & .chat-markdown :not(pre) > code {
-      color: var(--contrast-message-foreground);
-    }
   }
 }
 
@@ -1791,19 +1787,47 @@ code {
   font-weight: 600;
 }
 
-.chat-markdown :not(pre) > code {
-  border: 1px solid var(--contrast-border);
-  border-radius: 0.375rem;
-  background: var(--muted);
-  padding: 0.1rem 0.35rem;
-  color: var(--contrast-foreground);
-  font-size: 0.75rem;
+/* Inline highlights in a message: code spans, file chips, and bold. The body
+   renders at 80% foreground, so a chip drawn in that same foreground on a
+   one-shade-off surface reads as more paragraph. The chip takes the theme's
+   action hue instead, pulled toward the foreground so it stays legible as text
+   on both light and dark canvases, over a faint tint of the same hue. Bold
+   steps up to the full foreground so emphasis is brighter than its sentence. */
+.chat-markdown {
+  --chat-highlight: color-mix(in oklab, var(--message-action) 62%, var(--contrast-foreground));
+  --chat-highlight-surface: color-mix(in srgb, var(--message-action) 13%, transparent);
+  --chat-highlight-border: color-mix(in srgb, var(--message-action) 26%, transparent);
 }
 
-.chat-markdown .chat-markdown-file-link,
-.chat-markdown .chat-markdown-file-link:hover {
+.chat-markdown strong {
   color: var(--contrast-foreground);
+  font-weight: 600;
+}
+
+.chat-markdown :not(pre) > code {
+  border: 1px solid var(--chat-highlight-border);
+  border-radius: 0.375rem;
+  background: var(--chat-highlight-surface);
+  padding: 0.1rem 0.35rem;
+  color: var(--chat-highlight);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+/* File chips share the tint with inline code so a path and a command read as
+   the same kind of thing; the chip's own Tailwind surface is the composer's
+   neutral accent, which would put a grey pill next to a tinted one. */
+.chat-markdown .chat-markdown-file-link {
+  border-color: var(--chat-highlight-border);
+  background-color: var(--chat-highlight-surface);
+  color: var(--chat-highlight);
+  font-size: 0.8125rem;
   text-decoration: none;
+}
+
+.chat-markdown .chat-markdown-file-link:hover {
+  background-color: color-mix(in srgb, var(--message-action) 22%, transparent);
+  color: var(--chat-highlight);
 }
 
 .chat-markdown .chat-markdown-file-link:focus-visible {
